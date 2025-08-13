@@ -1,0 +1,9 @@
+{
+    "api_base_url": {
+        "description": "Aolarhapsody API 地址",
+        "type": "string",
+        "hint": "Aolarhapsody 后端服务地址",
+        "default": "",
+        "required": true
+    }
+}
