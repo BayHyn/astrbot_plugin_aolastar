@@ -1,8 +1,8 @@
 id: aolastar
-name: 奥拉星游戏内容解析
+name: aolastar
 author: vmoranv
 version: 1.0.0
-description: 通过后端 API 解析奥拉星游戏内容，支持精灵、技能、道具查询等功能。用法 /aolastar_pet <精灵名称> 等。
+description: 通过Aolarhapsody后端 API 解析奥拉星游戏内容
 repo: https://github.com/vmoranv/astrbot_plugin_aolastar
 requirements:
   - aiohttp>=3.8.0
