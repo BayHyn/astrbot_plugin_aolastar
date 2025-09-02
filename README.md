@@ -9,10 +9,12 @@
 ## ✨ 核心特性
 
 - 📦 **封包查询**: 获取奥拉星游戏现有封包列表
-- �  **智能搜索**: 支持正则表达式模糊搜索封包
-- � ***分页浏览**: 支持分页查看大量封包数据
+- 🔍 **智能搜索**: 支持正则表达式模糊搜索封包
+- 📄 **分页浏览**: 支持分页查看大量封包数据
 - ⚙️ **简单配置**: 只需配置后端 API 地址即可使用
 - 🔐 **安全管理**: 通过 WebUI 安全管理 API 配置
+- 🔮 **属性查询**: 支持查询奥拉星属性系别及克制关系
+- 🖼️ **图像展示**: 支持生成属性克制关系图
 
 ## 🎯 主要功能
 
@@ -21,6 +23,15 @@
 - `/ar_existingpacket next` - 显示下20个封包
 - `/ar_existingpacket prev` - 显示上20个封包
 - `/ar_existingpacket <名称>` - 搜索匹配名称的封包（支持正则表达式）
+
+### 加解密功能
+- `/ar_decrypt <Base64内容>` - 将Base64内容解密为JSON格式
+- `/ar_encrypt <JSON内容>` - 将JSON内容加密为Base64格式
+
+### 属性查询
+- `/ar_attr ls` - 列出所有属性系别
+- `/ar_attr <属性ID>` - 查看特定属性的克制关系（按攻击方和防御方分别显示）
+- `/ar_attr_image <属性ID>` - 生成特定属性的克制关系图
 
 ### 帮助信息
 - `/ar_help` - 显示帮助信息
@@ -45,6 +56,7 @@
    ```txt
    # requirements.txt
    aiohttp>=3.8.0
+   Pillow>=8.0.0
    ```
 
 3. **重启 AstrBot** 以加载插件和依赖
@@ -64,6 +76,8 @@
 
 后端服务提供以下 API 接口：
 - `GET /api/existing-activities` - 获取现有封包列表
+- `GET /api/skill-attributes` - 获取属性列表
+- `GET /api/attribute-relations/{id}` - 获取特定属性的克制列表
 
 详细的后端部署说明请参考：[Aolarhapsody 项目文档](https://github.com/vmoranv/aolarhapsody)
 
@@ -84,6 +98,29 @@
 /ar_existingpacket 石矶娘娘     # 搜索包含"石矶娘娘"的封包
 /ar_existingpacket .*挑战.*    # 使用正则表达式搜索包含"挑战"的封包
 /ar_existingpacket 哪吒        # 搜索包含"哪吒"的封包
+
+# 属性查询
+/ar_attr ls               # 列出所有属性系别
+/ar_attr 9                # 查看火属性的克制关系（按攻击方和防御方分别显示）
+/ar_attr 10               # 查看水属性的克制关系（按攻击方和防御方分别显示）
+/ar_attr_image 50         # 生成超上古·逆属性的克制关系图
+
+# 属性克制关系示例输出:
+# 🎯 超上古·逆 属性的克制关系:
+#
+# ⚔️ 攻击方 (当前属性攻击其他属性时):
+#   🔥 2倍伤害:
+#      • 普通
+#      • 格斗
+#      • 飞行
+#      ...
+#
+# 🛡 防御方 (其他属性攻击当前属性时):
+#   🔥 受到2倍伤害:
+#      • 超王
+#      • 仙灵
+#      • 虚境
+#   ...
 ```
 
 ## ⚙️ 配置选项
@@ -96,6 +133,8 @@
 
 - **api_base_url**: Aolarhapsody 后端服务的地址，插件会自动添加 `http://` 协议前缀（如果未指定协议）
 - 插件会调用 `{api_base_url}/api/existing-activities` 接口获取封包数据
+- 插件会调用 `{api_base_url}/api/skill-attributes` 接口获取属性列表
+- 插件会调用 `{api_base_url}/api/attribute-relations/{id}` 接口获取属性克制关系
 
 ## 🛠️ 开发构建
 
@@ -127,9 +166,21 @@ cp -r . /path/to/astrbot/data/plugins/astrbot_plugin_aolastar/
 - 确认后端服务的 `/api/existing-activities` 接口正常工作
 - 检查后端服务日志是否有错误信息
 
+**获取属性信息失败**
+- 确认后端服务的 `/api/skill-attributes` 和 `/api/attribute-relations/{id}` 接口正常工作
+- 检查后端服务日志是否有错误信息
+
 **模块未找到**
 - 重启 AstrBot 以确保依赖正确安装
 - 检查 `requirements.txt` 中的依赖是否已安装
+
+**图片生成功能不可用**
+- 确保已安装 Pillow 库
+- 目前图片生成功能仅支持 OneBot 平台
+
+**图片中文字体显示异常**
+- 插件使用系统默认字体生成图片，不同系统显示效果可能有所差异
+- 如果对字体显示效果有特殊要求，建议在系统层面安装合适的中文字体
 
 ## 📖 更多信息
 
@@ -164,6 +215,8 @@ cp -r . /path/to/astrbot/data/plugins/astrbot_plugin_aolastar/
 - **分页支持**: 自动分页显示大量数据，避免消息过长
 - **搜索功能**: 支持正则表达式搜索，查找特定封包
 - **缓存机制**: 智能缓存 API 数据，减少重复请求
+- **属性查询**: 支持查询奥拉星属性克制关系，帮助战斗策略制定
+- **图像展示**: 可生成属性克制关系图，更直观地展示信息
 
 ---
 

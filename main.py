@@ -8,6 +8,14 @@ from astrbot.api import logger
 
 # 导入加解密功能
 from .deencrypt import process_decrypt, process_encrypt
+# 导入属性查询功能
+from .attr import (
+    get_attributes_list, 
+    get_attribute_relations, 
+    format_attributes_list, 
+    format_attribute_relations,
+    generate_attribute_image
+)
 
 @register("aolastar", "vmoranv", "奥拉星游戏内容解析插件", "1.0.0")
 class AolastarPlugin(Star):
@@ -74,7 +82,7 @@ class AolastarPlugin(Star):
         """显示帮助信息"""
         help_text = """🎮 奥拉星封包查询插件
 
-📋 可用命令:
+📋 封包查询命令:
 • /ar_help - 显示此帮助信息
 • /ar_existingpacket - 获取现有封包列表（默认显示前20个）
 • /ar_existingpacket next - 显示下20个封包
@@ -82,28 +90,24 @@ class AolastarPlugin(Star):
 • /ar_existingpacket <名称> - 搜索包含指定名称的封包
 • /ar_existingpacket refresh - 强制刷新封包数据缓存
 
+🔐 加解密命令:
+• /ar_decrypt <Base64内容> - 将Base64内容解密为JSON格式
+• /ar_encrypt <JSON内容> - 将JSON内容加密为Base64格式
+
+🔮 属性查询命令:
+• /ar_attr ls - 列出所有属性系别
+• /ar_attr <属性ID> - 查看特定属性的克制关系
+• /ar_attr_image <属性ID> - 生成特定属性的克制关系图
+
 ⚙️ 配置说明:
 请在插件配置中设置 API 基础地址
 
-� 安全说明:
+⚠️ 安全说明:
 搜索功能使用安全的字符串匹配，每个用户的分页状态独立存储
 
 📖 更多信息请查看项目文档"""
         
-        # 更新帮助文本
-        updated_help_text = help_text.replace(
-            "📋 可用命令:",
-            """📋 封包查询命令:"""
-        ).replace(
-            "📖 更多信息请查看项目文档",
-            """🔐 加解密命令:
-• /ar_decrypt <Base64内容> - 将Base64内容解密为JSON格式
-• /ar_encrypt <JSON内容> - 将JSON内容加密为Base64格式
-
-📖 更多信息请查看项目文档"""
-        )
-        
-        yield event.plain_result(updated_help_text)
+        yield event.plain_result(help_text)
 
     async def _get_activities_data(self, force_refresh: bool = False) -> Optional[List[Dict[str, Any]]]:
         """获取活动数据，使用带失效机制的缓存"""
@@ -332,6 +336,142 @@ class AolastarPlugin(Star):
             search_name = " ".join(args)
             result = self._search_activities(activities, search_name)
             yield event.plain_result(result)
+
+    @filter.command("ar_attr")
+    async def attribute_command(self, event: AstrMessageEvent):
+        """属性查询命令"""
+        if not self.api_base_url:
+            yield event.plain_result("❌ API 基础地址未配置，请在插件设置中配置")
+            return
+        
+        # 解析命令参数
+        args = event.message_str.split()[1:] if len(event.message_str.split()) > 1 else []
+        
+        if not args:
+            yield event.plain_result("❌ 请提供属性查询参数\n用法: /ar_attr ls (列出所有属性) 或 /ar_attr <属性ID> (查看属性克制关系)")
+            return
+        
+        if args[0].lower() == "ls":
+            # 列出所有属性
+            yield event.plain_result("🔄 正在获取属性列表...")
+            
+            attributes = await get_attributes_list(self)
+            if not attributes:
+                yield event.plain_result("❌ 获取属性列表失败，请检查网络连接或API地址配置")
+                return
+            
+            result = format_attributes_list(attributes)
+            yield event.plain_result(result)
+            
+        else:
+            # 查询特定属性的克制关系
+            try:
+                attr_id = int(args[0])
+            except ValueError:
+                yield event.plain_result("❌ 请输入有效的属性ID\n用法: /ar_attr <属性ID>")
+                return
+            
+            yield event.plain_result("🔄 正在获取属性克制关系...")
+            
+            # 获取属性列表以获取属性名称
+            attributes = await get_attributes_list(self)
+            if not attributes:
+                yield event.plain_result("❌ 获取属性列表失败，请检查网络连接或API地址配置")
+                return
+            
+            # 查找指定ID的属性
+            target_attr = None
+            for attr in attributes:
+                if attr["id"] == attr_id:
+                    target_attr = attr
+                    break
+            
+            if not target_attr:
+                yield event.plain_result(f"❌ 未找到ID为 {attr_id} 的属性")
+                return
+            
+            # 获取属性克制关系
+            relations = await get_attribute_relations(self, attr_id)
+            if not relations:
+                yield event.plain_result(f"❌ 获取 {target_attr['name']} 属性的克制关系失败")
+                return
+            
+            # 预加载所有属性的关系数据，确保防御逻辑能够正确工作
+            logger.info(f"[DEBUG] 预加载所有属性的关系数据以支持防御分析")
+            for attr in attributes:
+                other_attr_id = attr["id"]
+                if other_attr_id != attr_id:  # 跳过已经加载的当前属性
+                    await get_attribute_relations(self, other_attr_id)
+            
+            logger.info(f"[DEBUG] 所有属性关系数据预加载完成，开始格式化属性关系")
+            result = format_attribute_relations(attr_id, target_attr["name"], relations, attributes)
+            yield event.plain_result(result)
+
+    @filter.command("ar_attr_image")
+    async def attribute_image_command(self, event: AstrMessageEvent):
+        """属性克制关系图生成命令"""
+        if not self.api_base_url:
+            yield event.plain_result("❌ API 基础地址未配置，请在插件设置中配置")
+            return
+        
+        # 解析命令参数
+        args = event.message_str.split()[1:] if len(event.message_str.split()) > 1 else []
+        
+        if not args:
+            yield event.plain_result("❌ 请提供属性ID\n用法: /ar_attr_image <属性ID>")
+            return
+        
+        try:
+            attr_id = int(args[0])
+        except ValueError:
+            yield event.plain_result("❌ 请输入有效的属性ID\n用法: /ar_attr_image <属性ID>")
+            return
+            
+        yield event.plain_result("🔄 正在生成属性克制关系图...")
+        
+        # 获取属性列表
+        attributes = await get_attributes_list(self)
+        if not attributes:
+            yield event.plain_result("❌ 获取属性列表失败，请检查网络连接或API地址配置")
+            return
+        
+        # 查找指定ID的属性
+        target_attr = None
+        for attr in attributes:
+            if attr["id"] == attr_id:
+                target_attr = attr
+                break
+        
+        if not target_attr:
+            yield event.plain_result(f"❌ 未找到ID为 {attr_id} 的属性")
+            return
+        
+        # 获取属性克制关系
+        relations = await get_attribute_relations(self, attr_id)
+        if not relations:
+            yield event.plain_result(f"❌ 获取 {target_attr['name']} 属性的克制关系失败")
+            return
+        
+        # 预加载所有属性的关系数据，确保防御逻辑能够正确工作
+        logger.info(f"[DEBUG] 预加载所有属性的关系数据以支持防御分析（图片生成）")
+        for attr in attributes:
+            other_attr_id = attr["id"]
+            if other_attr_id != attr_id:  # 跳过已经加载的当前属性
+                await get_attribute_relations(self, other_attr_id)
+        
+        logger.info(f"[DEBUG] 所有属性关系数据预加载完成，开始生成属性关系图")
+        # 生成图片
+        try:
+            image_bytes = await generate_attribute_image(attr_id, target_attr["name"], relations, attributes)
+            # 使用MessageChain发送图片
+            import astrbot.api.message_components as Comp
+            chain = [
+                Comp.Plain(f"{target_attr['name']} 属性的克制关系图：\n"),
+                Comp.Image.fromBytes(image_bytes)
+            ]
+            yield event.chain_result(chain)
+        except Exception as e:
+            yield event.plain_result(f"❌ 生成属性克制关系图失败: {str(e)}")
 
     async def terminate(self):
         """插件销毁"""

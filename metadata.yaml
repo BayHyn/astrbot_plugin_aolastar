@@ -1,8 +1,11 @@
 id: aolastar
-name: aolastar
-author: vmoranv
-version: 1.0.0
-description: 通过Aolarhapsody后端 API 解析奥拉星游戏内容
+name: "astrbot_plugin_aolastar"
+author: "vmoranv"
+version: "1.0.2"
+description: "奥拉星封包查询插件，支持属性克制关系查询和图像展示"
+dependencies:
+  - "aiohttp>=3.8.0"
+  - "Pillow>=8.0.0"
 repo: https://github.com/vmoranv/astrbot_plugin_aolastar
 requirements:
   - aiohttp>=3.8.0
