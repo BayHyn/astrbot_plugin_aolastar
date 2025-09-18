@@ -17,7 +17,7 @@ from .attr import (
     generate_attribute_image
 )
 
-@register("aolastar", "vmoranv", "奥拉星游戏内容解析插件", "1.0.0")
+@register("aolastar", "vmoranv", "奥拉星游戏内容解析插件", "1.0.3")
 class AolastarPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -52,7 +52,7 @@ class AolastarPlugin(Star):
             # 创建 HTTP 会话
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
-                headers={"User-Agent": "AstrBot-Aolastar-Plugin/1.0.0"}
+                headers={"User-Agent": "AstrBot-Aolastar-Plugin/1.0.3"}
             )
             
             logger.info(f"奥拉星插件初始化成功，API 地址: {self.api_base_url}")
@@ -70,9 +70,8 @@ class AolastarPlugin(Star):
             async with self.session.get(url, params=params) as response:
                 if response.status == 200:
                     return await response.json()
-                else:
-                    logger.error(f"API 请求失败: {response.status} - {url}")
-                    return None
+                logger.error(f"API 请求失败: {response.status} - {url}")
+                return None
         except Exception as e:
             logger.error(f"API 请求异常: {e}")
             return None
@@ -98,6 +97,10 @@ class AolastarPlugin(Star):
 • /ar_attr ls - 列出所有属性系别
 • /ar_attr <属性ID> - 查看特定属性的克制关系
 • /ar_attr_image <属性ID> - 生成特定属性的克制关系图
+
+🔄 亚比交换解析命令:
+• /ar_exchange <userid> - 解析亚比交换信息（直接输入userid数字）
+• /ar_exchange <链接> - 解析亚比交换信息（从链接中提取userid）
 
 ⚙️ 配置说明:
 请在插件配置中设置 API 基础地址
@@ -142,7 +145,7 @@ class AolastarPlugin(Star):
             name = activity.get("name", "未知活动")
             packet = activity.get("packet", "")
             # 截取封包信息的前50个字符
-            packet_preview = packet[:50] + "..." if len(packet) > 50 else packet
+            packet_preview = f"{packet[:50]}..." if len(packet) > 50 else packet
             message_lines.append(f"{start_index + i + 1}. {name}")
             if packet_preview:
                 message_lines.append(f"   封包: {packet_preview}")
@@ -194,9 +197,11 @@ class AolastarPlugin(Star):
         for i, activity in enumerate(matched_activities):
             name = activity.get("name", "未知活动")
             packet = activity.get("packet", "")
-            message_lines.append(f"{i + 1}. {name}")
-            message_lines.append(f"   封包: {packet}")
-            message_lines.append("")
+            message_lines.extend([
+                f"{i + 1}. {name}",
+                f"   封包: {packet}",
+                ""
+            ])
         
         return "\n".join(message_lines)
 
@@ -229,13 +234,11 @@ class AolastarPlugin(Star):
         # 处理结果显示
         if result.startswith("错误：") or result.startswith("解密错误:"):
             yield event.plain_result(f"❌ {result}")
+        elif len(result) > 2000:
+            truncated_result = f"{result[:2000]}\n\n⚠️ 结果过长，已截取显示前2000个字符"
+            yield event.plain_result(f"✅ 解密成功:\n```json\n{truncated_result}\n```")
         else:
-            # 如果结果太长，截取显示
-            if len(result) > 2000:
-                truncated_result = result[:2000] + "\n\n⚠️ 结果过长，已截取显示前2000个字符"
-                yield event.plain_result(f"✅ 解密成功:\n```json\n{truncated_result}\n```")
-            else:
-                yield event.plain_result(f"✅ 解密成功:\n```json\n{result}\n```")
+            yield event.plain_result(f"✅ 解密成功:\n```json\n{result}\n```")
 
     @filter.command("ar_encrypt")
     async def encrypt_command(self, event: AstrMessageEvent):
@@ -264,12 +267,10 @@ class AolastarPlugin(Star):
         # 处理结果显示
         if result.startswith("错误：") or result.startswith("加密错误:"):
             yield event.plain_result(f"❌ {result}")
+        elif len(result) > 2000:
+            yield event.plain_result(f"✅ 加密成功:\n```\n{result[:2000]}\n```\n⚠️ 结果过长，已截取显示前2000个字符")
         else:
-            # 如果结果太长，分段显示
-            if len(result) > 2000:
-                yield event.plain_result(f"✅ 加密成功:\n```\n{result[:2000]}\n```\n⚠️ 结果过长，已截取显示前2000个字符")
-            else:
-                yield event.plain_result(f"✅ 加密成功:\n```\n{result}\n```")
+            yield event.plain_result(f"✅ 加密成功:\n```\n{result}\n```")
 
     @filter.command("ar_existingpacket")
     async def existing_activities_command(self, event: AstrMessageEvent):
@@ -362,50 +363,45 @@ class AolastarPlugin(Star):
             
             result = format_attributes_list(attributes)
             yield event.plain_result(result)
+            return
             
-        else:
-            # 查询特定属性的克制关系
-            try:
-                attr_id = int(args[0])
-            except ValueError:
-                yield event.plain_result("❌ 请输入有效的属性ID\n用法: /ar_attr <属性ID>")
-                return
-            
-            yield event.plain_result("🔄 正在获取属性克制关系...")
-            
-            # 获取属性列表以获取属性名称
-            attributes = await get_attributes_list(self)
-            if not attributes:
-                yield event.plain_result("❌ 获取属性列表失败，请检查网络连接或API地址配置")
-                return
-            
-            # 查找指定ID的属性
-            target_attr = None
-            for attr in attributes:
-                if attr["id"] == attr_id:
-                    target_attr = attr
-                    break
-            
-            if not target_attr:
-                yield event.plain_result(f"❌ 未找到ID为 {attr_id} 的属性")
-                return
-            
-            # 获取属性克制关系
-            relations = await get_attribute_relations(self, attr_id)
-            if not relations:
-                yield event.plain_result(f"❌ 获取 {target_attr['name']} 属性的克制关系失败")
-                return
-            
-            # 预加载所有属性的关系数据，确保防御逻辑能够正确工作
-            logger.info(f"[DEBUG] 预加载所有属性的关系数据以支持防御分析")
-            for attr in attributes:
-                other_attr_id = attr["id"]
-                if other_attr_id != attr_id:  # 跳过已经加载的当前属性
-                    await get_attribute_relations(self, other_attr_id)
-            
-            logger.info(f"[DEBUG] 所有属性关系数据预加载完成，开始格式化属性关系")
-            result = format_attribute_relations(attr_id, target_attr["name"], relations, attributes)
-            yield event.plain_result(result)
+        # 查询特定属性的克制关系
+        try:
+            attr_id = int(args[0])
+        except ValueError:
+            yield event.plain_result("❌ 请输入有效的属性ID\n用法: /ar_attr <属性ID>")
+            return
+        
+        yield event.plain_result("🔄 正在获取属性克制关系...")
+        
+        # 获取属性列表以获取属性名称
+        attributes = await get_attributes_list(self)
+        if not attributes:
+            yield event.plain_result("❌ 获取属性列表失败，请检查网络连接或API地址配置")
+            return
+        
+        # 查找指定ID的属性
+        target_attr = next((attr for attr in attributes if attr["id"] == attr_id), None)
+        if not target_attr:
+            yield event.plain_result(f"❌ 未找到ID为 {attr_id} 的属性")
+            return
+        
+        # 获取属性克制关系
+        relations = await get_attribute_relations(self, attr_id)
+        if not relations:
+            yield event.plain_result(f"❌ 获取 {target_attr['name']} 属性的克制关系失败")
+            return
+        
+        # 预加载所有属性的关系数据，确保防御逻辑能够正确工作
+        logger.info("[DEBUG] 预加载所有属性的关系数据以支持防御分析")
+        for attr in attributes:
+            other_attr_id = attr["id"]
+            if other_attr_id != attr_id:  # 跳过已经加载的当前属性
+                await get_attribute_relations(self, other_attr_id)
+        
+        logger.info("[DEBUG] 所有属性关系数据预加载完成，开始格式化属性关系")
+        result = format_attribute_relations(attr_id, target_attr["name"], relations, attributes)
+        yield event.plain_result(result)
 
     @filter.command("ar_attr_image")
     async def attribute_image_command(self, event: AstrMessageEvent):
@@ -436,12 +432,7 @@ class AolastarPlugin(Star):
             return
         
         # 查找指定ID的属性
-        target_attr = None
-        for attr in attributes:
-            if attr["id"] == attr_id:
-                target_attr = attr
-                break
-        
+        target_attr = next((attr for attr in attributes if attr["id"] == attr_id), None)
         if not target_attr:
             yield event.plain_result(f"❌ 未找到ID为 {attr_id} 的属性")
             return
@@ -453,25 +444,225 @@ class AolastarPlugin(Star):
             return
         
         # 预加载所有属性的关系数据，确保防御逻辑能够正确工作
-        logger.info(f"[DEBUG] 预加载所有属性的关系数据以支持防御分析（图片生成）")
+        logger.info("[DEBUG] 预加载所有属性的关系数据以支持防御分析（图片生成）")
         for attr in attributes:
             other_attr_id = attr["id"]
             if other_attr_id != attr_id:  # 跳过已经加载的当前属性
                 await get_attribute_relations(self, other_attr_id)
         
-        logger.info(f"[DEBUG] 所有属性关系数据预加载完成，开始生成属性关系图")
+        logger.info("[DEBUG] 所有属性关系数据预加载完成，开始生成属性关系图")
         # 生成图片
         try:
             image_bytes = await generate_attribute_image(attr_id, target_attr["name"], relations, attributes)
             # 使用MessageChain发送图片
-            import astrbot.api.message_components as Comp
-            chain = [
-                Comp.Plain(f"{target_attr['name']} 属性的克制关系图：\n"),
-                Comp.Image.fromBytes(image_bytes)
-            ]
-            yield event.chain_result(chain)
+            try:
+                from astrbot.api.message_components import Plain, Image
+                chain = [
+                    Plain(f"{target_attr['name']} 属性的克制关系图：\n"),
+                    Image.fromBytes(image_bytes)
+                ]
+                yield event.chain_result(chain)
+            except ImportError:
+                # Fallback to plain text if message components are not available
+                yield event.plain_result(f"✅ {target_attr['name']} 属性的克制关系图已生成，但当前平台不支持图片显示")
         except Exception as e:
             yield event.plain_result(f"❌ 生成属性克制关系图失败: {str(e)}")
+
+    @filter.command("ar_exchange")
+    async def exchange_command(self, event: AstrMessageEvent):
+        """亚比交换解析命令"""
+        if not self.api_base_url:
+            yield event.plain_result("❌ API 基础地址未配置，请在插件设置中配置")
+            return
+        
+        # 解析消息内容，提取userid
+        message_text = event.message_str
+        userid = (userid_match[1]) if (userid_match := re.search(r'userid=(\d+)', message_text)) else None
+        if not userid:
+            # 尝试直接获取数字UID
+            args = event.message_str.split()[1:] if len(event.message_str.split()) > 1 else []
+            if not args:
+                yield event.plain_result("❌ 请提供userid或包含userid的链接\n用法: /ar_exchange <userid> 或 /ar_exchange <链接>")
+                return
+            
+            # 检查第一个参数是否为纯数字
+            if not args[0].isdigit():
+                yield event.plain_result("❌ 请输入有效的userid（数字）或包含userid的链接\n用法: /ar_exchange <userid> 或 /ar_exchange <链接>")
+                return
+            userid = args[0]
+        
+        logger.info(f"提取到userid: {userid}")
+        
+        yield event.plain_result("🔄 正在解析亚比交换信息...")
+        
+        # 构建API请求URL
+        api_url = f"{self.api_base_url}/api/extract-petid"
+        
+        # 根据OpenAPI规范准备请求数据，使用keyword字段
+        request_data = {"keyword": userid}
+        
+        try:
+            # 发送POST请求
+            async with self.session.post(api_url, json=request_data) as response:
+                # 记录详细的响应信息用于调试
+                response_text = await response.text()
+                logger.info(f"API响应状态: {response.status}, 响应内容: {response_text}")
+                
+                if response.status == 200:
+                    try:
+                        result = await response.json()
+                        formatted_result = self._format_petid_result(result)
+                        yield event.plain_result(formatted_result)
+                    except Exception as e:
+                        logger.error(f"JSON解析错误: {e}")
+                        yield event.plain_result(f"❌ 响应解析错误: {response_text}")
+                else:
+                    error_msg = f"❌ API请求失败，状态码: {response.status}, 错误信息: {response_text}"
+                    logger.error(error_msg)
+                    
+                    # 如果是400错误，尝试使用userIdList格式（兼容旧版本）
+                    if response.status == 400:
+                        logger.info("尝试使用userIdList格式进行兼容请求")
+                        request_data_compat = {"userIdList": [userid]}
+                        async with self.session.post(api_url, json=request_data_compat) as response2:
+                            response2_text = await response2.text()
+                            logger.info(f"兼容请求响应状态: {response2.status}, 响应内容: {response2_text}")
+                            
+                            if response2.status == 200:
+                                try:
+                                    result = await response2.json()
+                                    formatted_result = self._format_petid_result(result)
+                                    yield event.plain_result(formatted_result)
+                                except Exception as e:
+                                    logger.error(f"JSON解析错误: {e}")
+                                    yield event.plain_result(f"❌ 响应解析错误: {response2_text}")
+                            else:
+                                error_msg = f"❌ API请求失败（兼容格式），状态码: {response2.status}, 错误信息: {response2_text}"
+                                logger.error(error_msg)
+                                yield event.plain_result("❌ API端点调用错误，请确认后端服务是否正确配置了/extract-petid端点")
+                    else:
+                        yield event.plain_result(error_msg)
+        except Exception as e:
+            error_msg = f"❌ 解析亚比交换信息时发生错误: {str(e)}"
+            logger.error(error_msg)
+            yield event.plain_result(error_msg)
+
+    @filter.regex(r'http://www\.100bt\.com/aola/act/zt-friend/\?userid=\d+')
+    async def auto_extract_petid(self, event: AstrMessageEvent):
+        """自动监听并解析奥拉星好友链接"""
+        if not self.api_base_url:
+            return  # API未配置时静默跳过
+            
+        message_text = event.message_str
+        if (userid_match := re.search(r'userid=(\d+)', message_text)):
+            userid = userid_match[1]
+            logger.info(f"自动提取到userid: {userid}")
+            
+            # 构建API请求URL
+            api_url = f"{self.api_base_url}/api/extract-petid"
+            
+            # 根据OpenAPI规范准备请求数据，使用keyword字段
+            request_data = {"keyword": userid}
+            
+            try:
+                # 发送POST请求
+                async with self.session.post(api_url, json=request_data) as response:
+                    _ = await response.text()  # consume response but ignore content
+                    
+                    if response.status == 200:
+                        try:
+                            result = await response.json()
+                            formatted_result = self._format_petid_result(result)
+                            yield event.plain_result(formatted_result)
+                        except Exception as e:
+                            logger.error(f"JSON解析错误: {e}")
+                            # 自动解析失败时不提示用户
+                    elif response.status == 400:
+                        # 尝试使用userIdList格式（兼容旧版本）
+                        request_data_compat = {"userIdList": [userid]}
+                        async with self.session.post(api_url, json=request_data_compat) as response2:
+                            if response2.status == 200:
+                                try:
+                                    result = await response2.json()
+                                    formatted_result = self._format_petid_result(result)
+                                    yield event.plain_result(formatted_result)
+                                except Exception as e:
+                                    logger.error(f"JSON解析错误: {e}")
+                    else:
+                        logger.error(f"自动解析API请求失败，状态码: {response.status}")
+            except Exception as e:
+                logger.error(f"自动解析亚比交换信息时发生错误: {str(e)}")
+
+    def _format_petid_result(self, result: Dict[str, Any]) -> str:
+        """格式化亚比交换解析结果"""
+        if not result or "results" not in result:
+            return "❌ 未获取到有效的解析结果"
+        
+        results = result.get("results", [])
+        if not results:
+            return "❌ 未找到该用户的亚比交换信息"
+        
+        user_result = results[0]  # 取第一个结果
+        userid = user_result.get("userid", "未知")
+        success = user_result.get("success", False)
+        _ = user_result.get("petIds", [])  # pet_ids is unused
+        pet_infos = user_result.get("petInfos", [])
+        raw_data = user_result.get("rawData", {})
+        
+        message_lines = [f"🔍 亚比交换解析结果 - 用户ID: {userid}"]
+        
+        if not success:
+            message_lines.append("❌ 解析失败，可能用户不存在或没有交换记录")
+            return "\n".join(message_lines)
+        
+        # 显示基本信息
+        if (nn := raw_data.get("nn")):
+            state = raw_data.get("state", 0)
+            state_map = {0: "未知", 1: "正常", 2: "已交换"}
+            state_str = state_map.get(state, "未知")
+            message_lines.append(f"📛 用户名: {nn}")
+            message_lines.append(f"📊 状态: {state_str}")
+        
+        # 显示宠物信息
+        if pet_infos:
+            message_lines.append("\n🎯 拥有的亚比:")
+            for i, pet_info in enumerate(pet_infos, 1):
+                name = pet_info.get("name", "未知亚比")
+                pet_type = pet_info.get("type", "未知类型")  # Avoid shadowing built-in 'type'
+                type_emoji = {"gold": "💰", "silver": "🥈", "copper": "🥉"}.get(pet_type, "❓")
+                message_lines.append(f"{i}. {type_emoji} {name} ({pet_type})")
+        
+        # 显示交换记录
+        if (logs := raw_data.get("logs")):
+            self._format_exchange_logs(logs, message_lines)
+        
+        message_lines.append("\n💡 使用提示: 复制链接分享给其他玩家查看你的亚比交换信息")
+        
+        return "\n".join(message_lines)
+
+    def _format_user_info(self, raw_data: Dict[str, Any], message_lines: List[str]) -> None:
+        """格式化用户基本信息"""
+        if (nn := raw_data.get("nn")):
+            state = raw_data.get("state", 0)
+            state_map = {0: "未知", 1: "正常", 2: "已交换"}
+            state_str = state_map.get(state, "未知")
+            message_lines.append(f"📛 用户名: {nn}")
+            message_lines.append(f"📊 状态: {state_str}")
+
+    def _format_exchange_logs(self, logs: List[Dict[str, Any]], message_lines: List[str]) -> None:
+        """格式化交换记录"""
+        message_lines.append("\n📋 最近交换记录:")
+        for log in logs[:3]:  # 显示最近3条记录
+            de = log.get("de", 0)
+            re = log.get("re", "未知")
+            ne = log.get("ne", "未知用户")
+            # 转换时间戳为可读格式
+            from datetime import datetime
+            try:
+                time_str = datetime.fromtimestamp(de / 1000).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                time_str = "未知时间"
+            message_lines.append(f"   ⏰ {time_str}: 与 {ne} 交换了宠物 {re}")
 
     async def terminate(self):
         """插件销毁"""

@@ -33,6 +33,10 @@
 - `/ar_attr <属性ID>` - 查看特定属性的克制关系（按攻击方和防御方分别显示）
 - `/ar_attr_image <属性ID>` - 生成特定属性的克制关系图
 
+### 亚比交换解析
+- `/ar_exchange <userid>` - 解析亚比交换信息（直接输入userid数字）
+- `/ar_exchange <链接>` - 解析亚比交换信息（从链接中提取userid）
+
 ### 帮助信息
 - `/ar_help` - 显示帮助信息
 
@@ -104,6 +108,10 @@
 /ar_attr 9                # 查看火属性的克制关系（按攻击方和防御方分别显示）
 /ar_attr 10               # 查看水属性的克制关系（按攻击方和防御方分别显示）
 /ar_attr_image 50         # 生成超上古·逆属性的克制关系图
+
+# 亚比交换解析
+/ar_extract_petid 145535359  # 直接输入userid解析亚比交换信息
+/ar_extract_petid http://www.100bt.com/aola/act/zt-friend/?userid=174824317  # 从链接中解析亚比交换信息
 
 # 属性克制关系示例输出:
 # 🎯 超上古·逆 属性的克制关系:

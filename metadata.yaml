@@ -1,7 +1,7 @@
 id: aolastar
 name: "astrbot_plugin_aolastar"
 author: "vmoranv"
-version: "1.0.2"
+version: "1.0.3"
 description: "奥拉星封包查询插件，支持属性克制关系查询和图像展示"
 dependencies:
   - "aiohttp>=3.8.0"
