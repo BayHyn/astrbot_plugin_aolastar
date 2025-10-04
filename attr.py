@@ -2,9 +2,8 @@
 import time
 import io
 import os
-import platform
-import math
 import aiohttp
+from contextlib import suppress
 from typing import Optional, Dict, Any, List
 from PIL import Image, ImageDraw, ImageFont
 from astrbot.api import logger
@@ -12,8 +11,8 @@ from astrbot.api import logger
 def load_font_with_fallback(size: int):
     """
     加载字体并支持fallback机制，优先级：
-    1. macOS系统字体：/System/Library/Fonts/PingFang.ttc
-    2. Linux中文字体：/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc
+    1. macOS系统字体
+    2. Linux中文字体
     3. 其他常见字体路径
     4. 最后使用ImageFont.load_default()
     """
@@ -21,11 +20,15 @@ def load_font_with_fallback(size: int):
     font_paths = [
         # macOS系统字体
         "/System/Library/Fonts/PingFang.ttc",
+        os.path.expanduser("~/Library/Fonts/PingFang.ttc"),
         "/System/Library/Fonts/STHeiti Light.ttc",
+        os.path.expanduser("~/Library/Fonts/STHeiti Light.ttc"),
         "/System/Library/Fonts/Arial Unicode.ttf",
+        os.path.expanduser("~/Library/Fonts/Arial Unicode.ttf"),
         
         # Linux中文字体
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
         "/usr/share/fonts/truetype/arphic/ukai.ttc",
@@ -39,12 +42,18 @@ def load_font_with_fallback(size: int):
     
     # 尝试加载字体
     for font_path in font_paths:
+        logger.info(f"正在尝试加载字体: {font_path}")
         if os.path.exists(font_path):
             try:
-                return ImageFont.truetype(font_path, size)
+                font = ImageFont.truetype(font_path, size)
+                logger.info(f"成功加载字体: {font_path}")
+                return font
             except Exception as e:
                 logger.info(f"尝试加载字体 {font_path} 失败: {e}")
                 continue
+        else:
+            logger.info(f"字体路径不存在: {font_path}")
+
     
     # 如果所有字体都加载失败，使用默认字体
     logger.info("所有字体加载失败，使用默认字体")
@@ -169,11 +178,12 @@ def format_attributes_list(attributes: List[Dict[str, Any]]) -> str:
     # 按ID排序
     sorted_attrs = sorted(attributes, key=lambda x: x["id"])
     
-    for attr in sorted_attrs:
-        message_lines.append(f"{attr['id']:2d}. {attr['name']}")
+    message_lines.extend(f"{attr['id']:2d}. {attr['name']}" for attr in sorted_attrs)
     
-    message_lines.append(f"\n总计: {len(attributes)} 个属性系别")
-    message_lines.append("使用 /ar_attr <属性ID> 查看该属性的克制关系")
+    message_lines.extend([
+        f"\n总计: {len(attributes)} 个属性系别",
+        "使用 /ar_attr <属性ID> 查看该属性的克制关系",
+    ])
     
     return "\n".join(message_lines)
 
@@ -191,10 +201,7 @@ def parse_relation(relation: str) -> float:
         '3': 3.0     # 绝对克制
     }
     
-    if not relation or relation == '':
-        return 1.0
-    
-    return damage_mapping.get(relation, 1.0)
+    return damage_mapping.get(relation, 1.0) if relation else 1.0
 
 def get_attribute_icon_url(id: int) -> str:
     """获取系别图标URL"""
@@ -219,11 +226,10 @@ async def download_image(url: str) -> Optional[bytes]:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
-                if response.status == 200:
-                    return await response.read()
-                else:
+                if response.status != 200:
                     logger.info(f"下载图片失败: {response.status} - {url}")
                     return None
+                return await response.read()
     except Exception as e:
         logger.info(f"下载图片异常: {e}")
         return None
@@ -239,9 +245,7 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
     
     # 现代化的配色方案
     background_color = (245, 247, 250)  # 浅蓝灰色背景
-    text_color = (31, 41, 55)           # 深灰色文字
     title_color = (15, 23, 42)          # 深蓝灰色标题
-    subtitle_color = (71, 85, 105)       # 中灰色副标题
     
     # 精致的克制关系配色
     colors = {
@@ -263,30 +267,26 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
         # 绘制阴影
         if shadow:
             shadow_color = (0, 0, 0, 25)
-            try:
+            with suppress(Exception):
                 shadow_overlay = Image.new('RGBA', (w + 20, h + 20), (0, 0, 0, 0))
                 shadow_draw = ImageDraw.Draw(shadow_overlay)
                 shadow_draw.rounded_rectangle((8, 8, w + 12, h + 12), radius=radius, fill=shadow_color)
                 image.paste(shadow_overlay, (x + 5, y + 5), shadow_overlay)
-            except:
-                pass
         
         # 绘制主矩形
         try:
             draw.rounded_rectangle([x, y, x + w, y + h], radius=radius, fill=fill, outline=outline, width=outline_width)
-        except:
+        except Exception:
             draw.rectangle([x, y, x + w, y + h], fill=fill, outline=outline, width=outline_width)
         
         # 绘制高光效果
         if shadow:
             highlight_color = (255, 255, 255, 15)
-            try:
+            with suppress(Exception):
                 highlight_overlay = Image.new('RGBA', (w, h // 3), (0, 0, 0, 0))
                 highlight_draw = ImageDraw.Draw(highlight_overlay)
                 highlight_draw.rounded_rectangle((0, 0, w, h // 3), radius=radius, fill=highlight_color)
                 image.paste(highlight_overlay, (x, y), highlight_overlay)
-            except:
-                pass
     
     def draw_circle_with_border(x, y, radius, fill, border_color, border_width=2):
         """绘制带边框的圆形"""
@@ -296,14 +296,12 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
     
     # 加载字体
     try:
-        font_title = load_font_with_fallback(42)     # 标题字体
         font_large = load_font_with_fallback(32)     # 大号字体
         font_medium = load_font_with_fallback(26)    # 中号字体
         font_small = load_font_with_fallback(20)     # 小号字体
         font_tiny = load_font_with_fallback(16)      # 微小字体
     except Exception as e:
         logger.info(f"字体加载出现异常: {e}")
-        font_title = ImageFont.load_default()
         font_large = ImageFont.load_default()
         font_medium = ImageFont.load_default()
         font_small = ImageFont.load_default()
@@ -341,7 +339,7 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
         name_bbox = draw.textbbox((0, 0), attr_name, font=font_large)
         name_width = name_bbox[2] - name_bbox[0]
         name_height = name_bbox[3] - name_bbox[1]
-    except:
+    except Exception:
         name_width = len(attr_name) * 18
         name_height = 26
     
@@ -385,13 +383,13 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
         
         # 特殊处理：原系攻击超系
         if not is_current_super and is_target_super:
-            if not any(icon_id == 999 for _, icon_id in attack_relations['weak']):
+            if 999 not in {icon_id for _, icon_id in attack_relations['weak']}:
                 attack_relations['weak'].append(("超系", 999))
             continue
             
         # 特殊处理：超系攻击原系
         if is_current_super and not is_target_super:
-            if not any(icon_id == 1000 for _, icon_id in attack_relations['strong']):
+            if 1000 not in {icon_id for _, icon_id in attack_relations['strong']}:
                 attack_relations['strong'].append(("原系", 1000))
             continue
             
@@ -420,13 +418,13 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
         
         # 特殊处理：原系攻击超系
         if not is_other_super and is_current_super:
-            if not any(icon_id == 1000 for _, icon_id in defend_relations['weak']):
+            if 1000 not in {icon_id for _, icon_id in defend_relations['weak']}:
                 defend_relations['weak'].append(("原系", 1000))
             continue
             
         # 特殊处理：超系攻击原系
         if is_other_super and not is_current_super:
-            if not any(icon_id == 999 for _, icon_id in defend_relations['strong']):
+            if 999 not in {icon_id for _, icon_id in defend_relations['strong']}:
                 defend_relations['strong'].append(("超系", 999))
             continue
             
@@ -453,11 +451,8 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
     
     # 绘制攻击关系标题 - 修复PIL渲染问题
     attack_title = "攻击 攻击克制关系"
-    try:
-        attack_title_bbox = draw.textbbox((0, 0), attack_title, font=font_medium)
-        attack_title_width = attack_title_bbox[2] - attack_title_bbox[0]
-    except:
-        attack_title_width = len(attack_title) * 20
+    with suppress(Exception):
+        draw.textbbox((0, 0), attack_title, font=font_medium)
     
     attack_title_x = attack_panel_x + 20
     attack_title_y = attack_panel_y + 15
@@ -479,11 +474,8 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
     
     # 绘制防御关系标题 - 修复PIL渲染问题
     defend_title = "防御 防御克制关系"
-    try:
-        defend_title_bbox = draw.textbbox((0, 0), defend_title, font=font_medium)
-        defend_title_width = defend_title_bbox[2] - defend_title_bbox[0]
-    except:
-        defend_title_width = len(defend_title) * 20
+    with suppress(Exception):
+        draw.textbbox((0, 0), defend_title, font=font_medium)
     
     defend_title_x = defend_panel_x + 20
     defend_title_y = defend_panel_y + 15
@@ -533,329 +525,192 @@ async def generate_attribute_image(attr_id: int, attr_name: str, relations: Dict
     
     return img_byte_arr.getvalue()
 
+async def _draw_relation_items(draw, image, items, x, y, font_small):
+    """Helper function to draw icons and names for a list of relation items."""
+    items_per_row = 4
+    for i, (name, icon_id) in enumerate(items):
+        row = i // items_per_row
+        col = i % items_per_row
+        
+        item_x = x + col * 150
+        item_y = y + row * 70
+        
+        icon = None
+        try:
+            async with aiohttp.ClientSession() as session:
+                icon = await attr_cache.get_attribute_icon(session, icon_id)
+                if icon:
+                    icon = icon.resize((60, 60))
+        except Exception as e:
+            logger.info(f"获取属性图标失败: {e}")
+        
+        if icon:
+            with suppress(Exception):
+                image.paste(icon, (item_x, item_y), icon if 'A' in icon.getbands() else None)
+
+        with suppress(Exception):
+            draw.textbbox((0, 0), name, font=font_small)
+        
+        name_x = item_x + 70
+        name_y = item_y + 20
+        draw.text((name_x, name_y), name, fill=(31, 41, 55), font=font_small)
+
+
 async def draw_relations_section(draw, image, relations, x, y, width, height, colors, font_medium, font_small):
     """绘制克制关系区域的通用函数"""
-    # 定义关系类型信息 - 简化显示，删除emoji符号
     relation_types = [
-        ('super', '绝对克制', '3倍伤害'),
-        ('strong', '克制', '2倍伤害'),
-        ('weak', '微弱', '1/2伤害'),
-        ('immune', '无效', '无伤害')
+        ('super', '绝对克制'),
+        ('strong', '克制'),
+        ('weak', '微弱'),
+        ('immune', '无效')
     ]
     
     current_y = y
     
-    for rel_type, title, desc in relation_types:
-        items = relations.get(rel_type, [])
-        if not items:
+    for rel_type, title in relation_types:
+        if not (items := relations.get(rel_type, [])):
             continue
         
-        # 绘制关系类型标题
-        try:
-            title_bbox = draw.textbbox((0, 0), title, font=font_medium)
-            title_width = title_bbox[2] - title_bbox[0]
-        except:
-            title_width = len(title) * 16
-        
-        # 绘制颜色指示器
         draw.rectangle([x, current_y, x + 15, current_y + 15], fill=colors[rel_type])
-        
-        # 绘制标题文字
         draw.text((x + 25, current_y), title, fill=colors[rel_type], font=font_medium)
-        
         current_y += 25
         
-        # 绘制属性图标和名称 - 水平排列，图标在左，文字在右
-        items_per_row = 4  # 减少每行显示的数量以适应水平排列
-        for i, (name, icon_id) in enumerate(items):
-            row = i // items_per_row
-            col = i % items_per_row
-            
-            item_x = x + col * 150
-            item_y = current_y + row * 70
-            
-            # 获取并绘制图标 - 放大图标尺寸
-            icon = None
-            try:
-                async with aiohttp.ClientSession() as session:
-                    icon = await attr_cache.get_attribute_icon(session, icon_id)
-                    if icon:
-                        icon = icon.resize((60, 60))  # 从40x40放大到60x60
-            except Exception as e:
-                logger.info(f"获取属性图标失败: {e}")
-            
-            if icon:
-                try:
-                    image.paste(icon, (item_x, item_y), icon if 'A' in icon.getbands() else None)
-                except:
-                    image.paste(icon, (item_x, item_y))
-            
-            # 绘制属性名称 - 放在图标右侧
-            try:
-                name_bbox = draw.textbbox((0, 0), name, font=font_small)
-                name_width = name_bbox[2] - name_bbox[0]
-            except:
-                name_width = len(name) * 8
-            
-            name_x = item_x + 70  # 图标右侧
-            name_y = item_y + 20  # 垂直居中
-            draw.text((name_x, name_y), name, fill=(31, 41, 55), font=font_small)
+        await _draw_relation_items(draw, image, items, x, current_y, font_small)
         
-        # 计算该类型占用的行数
-        rows_needed = (len(items) + items_per_row - 1) // items_per_row
+        rows_needed = (len(items) + 3) // 4
         current_y += rows_needed * 70 + 20
         
         if current_y > y + height:
-            break  # 防止超出区域边界
+            break
 
-def format_attribute_relations(attr_id: int, attr_name: str, relations: Dict[str, str], 
-                             all_attributes: List[Dict[str, Any]]) -> str:
-    """格式化属性克制关系显示"""
-    message_lines = [f"目标 {attr_name} 属性的克制关系:\n"]
-    
-    # 创建ID到名称的映射
-    id_to_name = {attr["id"]: attr["name"] for attr in all_attributes}
-    
-    # 分类显示攻击方关系（当前属性攻击其他属性时的倍率）
-    attack_strong = []      # 攻击时2倍伤害
-    attack_super = []       # 攻击时3倍伤害
-    attack_weak = []        # 攻击时1/2伤害
-    attack_immune = []      # 攻击时无伤害
-    attack_normal = []      # 攻击时正常伤害
-    
-    # 处理攻击关系 - 当前属性攻击其他属性时的倍率
+def _classify_relations(
+    relations_dict: Dict[str, list], multiplier: str, name: str, log_prefix: str
+):
+    """Helper function to classify relations based on multiplier."""
+    damage_value = parse_relation(multiplier)
+    logger.info(f"[DEBUG] {log_prefix} - 最终倍率分类: {damage_value}")
+
+    relation_map = {
+        3.0: ('super', "造成3倍伤害"),
+        2.0: ('strong', "造成2倍伤害"),
+        0.5: ('weak', "造成1/2伤害"),
+        -1.0: ('immune', "无伤害"),
+        1.0: ('normal', "造成1倍伤害"),
+    }
+
+    if damage_value in relation_map:
+        key, desc = relation_map[damage_value]
+        relations_dict[key].append(name)
+        logger.info(f"[DEBUG] {log_prefix} - 最终分类: {damage_value} -> {key} ({desc}): {name}")
+    else:
+        logger.info(f"[DEBUG] {log_prefix} - 倍率 {damage_value} 未被分类到任何类别")
+
+
+def _calculate_attack_relations(attr_id, relations, id_to_name):
+    """Calculate and classify attack relations."""
+    attack_relations = {'strong': [], 'super': [], 'weak': [], 'immune': [], 'normal': []}
     is_current_super = is_super_attribute(attr_id)
-    
-    # 调试日志：记录文本格式攻击分析开始
-    logger.info(f"[DEBUG] 文本攻击分析开始 - 当前属性: {attr_name} (ID: {attr_id}, 超系: {is_current_super})")
-    
+
     for target_id_str, multiplier in relations.items():
         target_id = int(target_id_str)
-        target_name = id_to_name.get(target_id)
-        
-        # 跳过无效的属性ID
-        if target_name is None:
+        if not (target_name := id_to_name.get(target_id)):
             continue
-            
+
         is_target_super = is_super_attribute(target_id)
-        
-        # 调试日志：记录每个属性的攻击关系分析
-        logger.info(f"[DEBUG] 文本攻击分析 - 目标属性: {target_name} (ID: {target_id}, 超系: {is_target_super})")
-        logger.info(f"[DEBUG] 文本攻击分析 - 倍率数据: {multiplier}")
-        logger.info(f"[DEBUG] 文本攻击分析 - 条件判断: 原系攻击超系={not is_current_super and is_target_super}")
-        logger.info(f"[DEBUG] 文本攻击分析 - 条件判断: 超系攻击原系={is_current_super and not is_target_super}")
-        
-        # 特殊处理：原系攻击超系固定为1/2倍伤害，统一显示为"超系"
         if not is_current_super and is_target_super:
-            logger.info(f"[DEBUG] 文本攻击分析 - 触发特殊规则: 原系攻击超系，添加'超系'到attack_weak")
-            # 检查是否已经添加了统一的超系图标（与React版本保持一致）
-            if not any(item == "超系" for item in attack_weak):
-                attack_weak.append("超系")
-                logger.info(f"[DEBUG] 文本攻击分析 - 统一图标添加: 超系 -> attack_weak")
-            else:
-                logger.info(f"[DEBUG] 文本攻击分析 - 统一图标已存在，跳过添加: 超系")
-            # 跳过后续的倍率处理，因为这是特殊规则
+            if "超系" not in attack_relations['weak']:
+                attack_relations['weak'].append("超系")
             continue
-            
-        # 特殊处理：超系攻击原系固定为2倍伤害，统一显示为"原系"
         if is_current_super and not is_target_super:
-            logger.info(f"[DEBUG] 文本攻击分析 - 触发特殊规则: 超系攻击原系，添加'原系'到attack_strong")
-            # 检查是否已经添加了统一的原系图标（与React版本保持一致）
-            if not any(item == "原系" for item in attack_strong):
-                attack_strong.append("原系")
-                logger.info(f"[DEBUG] 文本攻击分析 - 统一图标添加: 原系 -> attack_strong")
-            else:
-                logger.info(f"[DEBUG] 文本攻击分析 - 统一图标已存在，跳过添加: 原系")
-            # 跳过后续的倍率处理，因为这是特殊规则
+            if "原系" not in attack_relations['strong']:
+                attack_relations['strong'].append("原系")
             continue
-            
-        # 根据倍率分类
-        damage_value = parse_relation(multiplier)
-        logger.info(f"[DEBUG] 文本攻击分析 - 最终倍率分类: {damage_value}")
-        
-        if damage_value == 2.0:
-            attack_strong.append(f"{target_name}")
-            logger.info(f"[DEBUG] 文本攻击分析 - 最终分类: {damage_value} -> attack_strong (造成2倍伤害): {target_name}")
-        elif damage_value == 3.0:
-            attack_super.append(f"{target_name}")
-            logger.info(f"[DEBUG] 文本攻击分析 - 最终分类: {damage_value} -> attack_super (造成3倍伤害): {target_name}")
-        elif damage_value == 0.5:
-            attack_weak.append(f"{target_name}")
-            logger.info(f"[DEBUG] 文本攻击分析 - 最终分类: {damage_value} -> attack_weak (造成1/2伤害): {target_name}")
-        elif damage_value == -1.0:
-            attack_immune.append(f"{target_name}")
-            logger.info(f"[DEBUG] 文本攻击分析 - 最终分类: {damage_value} -> attack_immune (无伤害): {target_name}")
-        elif damage_value == 1.0:
-            attack_normal.append(f"{target_name}")
-            logger.info(f"[DEBUG] 文本攻击分析 - 最终分类: {damage_value} -> attack_normal (造成1倍伤害): {target_name}")
-        else:
-            logger.info(f"[DEBUG] 文本攻击分析 - 倍率 {damage_value} 未被分类到任何攻击类别")
-    
-    # 分类显示防御方关系（其他属性攻击当前属性时的倍率）
-    defend_strong = []      # 被攻击时受到2倍伤害
-    defend_super = []       # 被攻击时受到3倍伤害
-    defend_weak = []        # 被攻击时受到1/2伤害
-    defend_immune = []      # 被攻击时免疫伤害
-    defend_normal = []      # 被攻击时受到正常伤害
-    
-    # 获取所有属性对当前属性的关系
+
+        log_prefix = f"文本攻击分析 - 目标属性: {target_name} (ID: {target_id}, 超系: {is_target_super})"
+        _classify_relations(attack_relations, multiplier, target_name, log_prefix)
+    return attack_relations
+
+
+def _calculate_defend_relations(attr_id, all_attributes, id_to_name):
+    """Calculate and classify defense relations."""
+    defend_relations = {'strong': [], 'super': [], 'weak': [], 'immune': [], 'normal': []}
     is_current_super = is_super_attribute(attr_id)
-    
-    # 调试日志：记录文本格式防御分析开始
-    logger.info(f"[DEBUG] 文本防御分析开始 - 当前属性: {attr_name} (ID: {attr_id}, 超系: {is_current_super})")
-    
-    # 调试日志：检查缓存中的属性关系数据
-    logger.info(f"[DEBUG] 文本防御分析 - 缓存中的属性关系数量: {len(attr_cache.attribute_relations)}")
-    for cached_id, relations in attr_cache.attribute_relations.items():
-        logger.info(f"[DEBUG] 文本防御分析 - 缓存的属性 {cached_id} 的关系: {relations}")
-    
+
     for attr in all_attributes:
         other_attr_id = attr["id"]
         if other_attr_id == attr_id:
             continue
-            
-        other_attr_name = attr['name']
-        # 获取其他属性对该属性的克制关系
+
+        is_other_super = is_super_attribute(other_attr_id)
+        if is_other_super != is_current_super:
+            if is_current_super:
+                if "原系" not in defend_relations['weak']:
+                    defend_relations['weak'].append("原系")
+            elif "超系" not in defend_relations['strong']:
+                defend_relations['strong'].append("超系")
+            continue
+
         other_relations = attr_cache.attribute_relations.get(other_attr_id, {})
         multiplier = other_relations.get(str(attr_id), "")
-        
-        is_other_super = is_super_attribute(other_attr_id)
-        
-        # 调试日志：记录每个属性的防御关系分析
-        logger.info(f"[DEBUG] 文本防御分析 - 其他属性: {other_attr_name} (ID: {other_attr_id}, 超系: {is_other_super})")
-        logger.info(f"[DEBUG] 文本防御分析 - 倍率数据: {multiplier}")
-        logger.info(f"[DEBUG] 文本防御分析 - 条件判断: 原系攻击超系={not is_other_super and is_current_super}")
-        logger.info(f"[DEBUG] 文本防御分析 - 条件判断: 超系攻击原系={is_other_super and not is_current_super}")
-        
-        # 特殊处理：原系攻击超系固定为1/2倍伤害
-        if not is_other_super and is_current_super:
-            logger.info(f"[DEBUG] 文本防御分析 - 触发特殊规则: 原系攻击超系，添加'原系'到defend_weak")
-            # 检查是否已经添加了统一的原系图标（使用ID去重，与React版本保持一致）
-            if not any(item == "原系" for item in defend_weak):
-                defend_weak.append("原系")
-                logger.info(f"[DEBUG] 文本防御分析 - 统一图标添加: 原系 -> defend_weak")
-            else:
-                logger.info(f"[DEBUG] 文本防御分析 - 统一图标已存在，跳过添加: 原系")
-            # 跳过后续的倍率处理，因为这是特殊规则
+        log_prefix = f"文本防御分析 - 其他属性: {attr['name']} (ID: {other_attr_id}, 超系: {is_other_super})"
+        _classify_relations(defend_relations, multiplier, attr['name'], log_prefix)
+    return defend_relations
 
-            continue
-            
-        # 特殊处理：超系攻击原系固定为2倍伤害
-        if is_other_super and not is_current_super:
-            logger.info(f"[DEBUG] 文本防御分析 - 触发特殊规则: 超系攻击原系，添加'超系'到defend_strong")
-            # 检查是否已经添加了统一的超系图标（使用ID去重，与React版本保持一致）
-            if not any(item == "超系" for item in defend_strong):
-                defend_strong.append("超系")
-                logger.info(f"[DEBUG] 文本防御分析 - 统一图标添加: 超系 -> defend_strong")
-            else:
-                logger.info(f"[DEBUG] 文本防御分析 - 统一图标已存在，跳过添加: 超系")
-            # 跳过后续的倍率处理，因为这是特殊规则
-            continue
-            
-        # 调试日志：检查是否到达超系vs超系的处理
-        if is_other_super and is_current_super:
-            logger.info(f"[DEBUG] 文本防御分析 - 超系vs超系情况: {other_attr_name}({other_attr_id}) 攻击 {attr_name}({attr_id})")
-            logger.info(f"[DEBUG] 文本防御分析 - API倍率: '{multiplier}', 解析后倍率: {parse_relation(multiplier)}")
-        
-        # 根据倍率分类
-        damage_value = parse_relation(multiplier)
-        logger.info(f"[DEBUG] 文本防御分析 - 最终倍率分类: {damage_value}")
-        
-        if damage_value == 2.0:
-            defend_strong.append(f"{attr['name']}")
-            logger.info(f"[DEBUG] 文本防御分析 - 最终分类: {damage_value} -> defend_strong (受到2倍伤害): {attr['name']}")
-        elif damage_value == 3.0:
-            defend_super.append(f"{attr['name']}")
-            logger.info(f"[DEBUG] 文本防御分析 - 最终分类: {damage_value} -> defend_super (受到3倍伤害): {attr['name']}")
-        elif damage_value == 0.5:
-            defend_weak.append(f"{attr['name']}")
-            logger.info(f"[DEBUG] 文本防御分析 - 最终分类: {damage_value} -> defend_weak (受到1/2伤害): {attr['name']}")
-        elif damage_value == -1.0:
-            defend_immune.append(f"{attr['name']}")
-            logger.info(f"[DEBUG] 文本防御分析 - 最终分类: {damage_value} -> defend_immune (免疫伤害): {attr['name']}")
-        elif damage_value == 1.0:
-            defend_normal.append(f"{attr['name']}")
-            logger.info(f"[DEBUG] 文本防御分析 - 最终分类: {damage_value} -> defend_normal (受到1倍伤害): {attr['name']}")
-        else:
-            logger.info(f"[DEBUG] 文本防御分析 - 倍率 {damage_value} 未被分类到任何防御类别")
-    
-    # 攻击方克制关系
-    message_lines.append("攻击方 (当前属性攻击其他属性时):")
-    
-    if attack_super:
-        message_lines.append("  爆炸 绝对克制 (3倍伤害):")
-        for name in attack_super:
-            message_lines.append(f"     • {name}")
-    
-    if attack_strong:
-        message_lines.append("  火焰 克制 (2倍伤害):")
-        for name in attack_strong:
-            message_lines.append(f"     • {name}")
-    
-    if attack_weak:
-        message_lines.append("  雪花 微弱 (1/2伤害):")
-        for name in attack_weak:
-            message_lines.append(f"     • {name}")
-    
-    if attack_immune:
-        message_lines.append("  盾牌 无效 (无伤害):")
-        for name in attack_immune:
-            message_lines.append(f"     • {name}")
-    
-    if attack_normal:
-        message_lines.append("  箭头 一般 (1倍伤害):")
-        # 只显示前10个，避免信息过载
-        for name in attack_normal[:10]:
-            message_lines.append(f"     • {name}")
-        if len(attack_normal) > 10:
-            message_lines.append(f"     ... 还有 {len(attack_normal) - 10} 个")
-    
-    if not (attack_super or attack_strong or attack_weak or attack_immune or attack_normal):
-        message_lines.append("  箭头 对所有属性造成正常伤害(1倍)")
-    
-    message_lines.append("")
-    
-    # 防御方克制关系
-    message_lines.append("防御方 (其他属性攻击当前属性时):")
-    
-    if defend_super:
-        message_lines.append("  爆炸 绝对克制 (受到3倍伤害):")
-        for name in defend_super:
-            message_lines.append(f"     • {name}")
-    
-    if defend_strong:
-        message_lines.append("  火焰 克制 (受到2倍伤害):")
-        for name in defend_strong:
-            message_lines.append(f"     • {name}")
-    
-    if defend_weak:
-        message_lines.append("  雪花 微弱 (受到1/2伤害):")
-        for name in defend_weak:
-            message_lines.append(f"     • {name}")
-    
-    if defend_immune:
-        message_lines.append("  盾牌 无效 (免疫伤害):")
-        for name in defend_immune:
-            message_lines.append(f"     • {name}")
-    
-    if defend_normal:
-        message_lines.append("  箭头 一般 (受到1倍伤害):")
-        # 只显示前10个，避免信息过载
-        for name in defend_normal[:10]:
-            message_lines.append(f"     • {name}")
-        if len(defend_normal) > 10:
-            message_lines.append(f"     ... 还有 {len(defend_normal) - 10} 个")
-    
-    if not (defend_super or defend_strong or defend_weak or defend_immune or defend_normal):
-        message_lines.append("  箭头 来自所有属性的攻击都受到正常伤害(1倍)")
-    
-    message_lines.append("")
-    message_lines.append("说明:")
-    message_lines.append("   • 3 = 绝对克制 (3倍伤害)")
-    message_lines.append("   • 2 = 克制 (2倍伤害)")
-    message_lines.append("   • 1/2 = 微弱 (1/2伤害)")
-    message_lines.append("   • -1 = 无效 (无伤害)")
-    message_lines.append("   • 空 = 一般 (1倍伤害)")
-    message_lines.append("\n使用 /ar_attr_image <属性ID> 可以获取图片版的克制关系图")
-    
+
+def format_attribute_relations(
+    attr_id: int,
+    attr_name: str,
+    relations: Dict[str, str],
+    all_attributes: List[Dict[str, Any]],
+) -> str:
+    """格式化属性克制关系显示"""
+    id_to_name = {attr["id"]: attr["name"] for attr in all_attributes}
+
+    attack_relations = _calculate_attack_relations(attr_id, relations, id_to_name)
+    defend_relations = _calculate_defend_relations(attr_id, all_attributes, id_to_name)
+
+    message_lines = [
+        f"目标 {attr_name} 属性的克制关系:\n",
+        "攻击方 (当前属性攻击其他属性时):",
+    ]
+    _format_relation_lines(message_lines, attack_relations)
+
+    message_lines.extend(["", "防御方 (其他属性攻击当前属性时):"])
+    _format_relation_lines(message_lines, defend_relations)
+
+    message_lines.extend([
+        "",
+        "说明:",
+        "   • 3 = 绝对克制 (3倍伤害)",
+        "   • 2 = 克制 (2倍伤害)",
+        "   • 1/2 = 微弱 (1/2伤害)",
+        "   • -1 = 无效 (无伤害)",
+        "   • 空 = 一般 (1倍伤害)",
+        "\n使用 /ar_attr_image <属性ID> 可以获取图片版的克制关系图",
+    ])
     return "\n".join(message_lines)
+
+
+def _format_relation_lines(message_lines: List[str], relations: Dict[str, list]):
+    """Helper function to format relation lines for display."""
+    relation_map = {
+        'super': "  爆炸 绝对克制 (3倍伤害):",
+        'strong': "  火焰 克制 (2倍伤害):",
+        'weak': "  雪花 微弱 (1/2伤害):",
+        'immune': "  盾牌 无效 (无伤害):",
+        'normal': "  箭头 一般 (1倍伤害):",
+    }
+    
+    formatted = False
+    for key, header in relation_map.items():
+        if names := relations.get(key):
+            message_lines.append(header)
+            if key == 'normal' and len(names) > 10:
+                message_lines.extend(f"     • {name}" for name in names[:10])
+                message_lines.append(f"     ... 还有 {len(names) - 10} 个")
+            else:
+                message_lines.extend(f"     • {name}" for name in names)
+            formatted = True
+
+    if not formatted:
+        message_lines.append("  箭头 对所有属性造成正常伤害(1倍)")

@@ -503,6 +503,9 @@ class AolastarPlugin(Star):
         
         try:
             # 发送POST请求
+            if not self.session:
+                yield event.plain_result("❌ HTTP会话未初始化")
+                return
             async with self.session.post(api_url, json=request_data) as response:
                 # 记录详细的响应信息用于调试
                 response_text = await response.text()
@@ -524,6 +527,9 @@ class AolastarPlugin(Star):
                     if response.status == 400:
                         logger.info("尝试使用userIdList格式进行兼容请求")
                         request_data_compat = {"userIdList": [userid]}
+                        if not self.session:
+                            yield event.plain_result("❌ HTTP会话未初始化")
+                            return
                         async with self.session.post(api_url, json=request_data_compat) as response2:
                             response2_text = await response2.text()
                             logger.info(f"兼容请求响应状态: {response2.status}, 响应内容: {response2_text}")
@@ -566,6 +572,9 @@ class AolastarPlugin(Star):
             
             try:
                 # 发送POST请求
+                if not self.session:
+                    logger.error("HTTP会话未初始化，无法自动解析")
+                    return
                 async with self.session.post(api_url, json=request_data) as response:
                     _ = await response.text()  # consume response but ignore content
                     
@@ -580,6 +589,9 @@ class AolastarPlugin(Star):
                     elif response.status == 400:
                         # 尝试使用userIdList格式（兼容旧版本）
                         request_data_compat = {"userIdList": [userid]}
+                        if not self.session:
+                            logger.error("HTTP会话未初始化，无法自动解析")
+                            return
                         async with self.session.post(api_url, json=request_data_compat) as response2:
                             if response2.status == 200:
                                 try:
