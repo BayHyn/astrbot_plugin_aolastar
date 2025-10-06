@@ -98,6 +98,11 @@ class AolastarPlugin(Star):
 • /ar_attr <属性ID> - 查看特定属性的克制关系
 • /ar_attr_image <属性ID> - 生成特定属性的克制关系图
 
+🐾 亚比查询命令:
+• /ar_pet_search <关键词> - 根据关键词搜索亚比
+• /ar_pet_query <ID> - 根据ID查询单个亚比信息
+• /ar_pet_query <ID1,ID2,ID3> - 根据多个ID查询亚比信息（逗号分隔）
+
 🔄 亚比交换解析命令:
 • /ar_exchange <userid> - 解析亚比交换信息（直接输入userid数字）
 • /ar_exchange <链接> - 解析亚比交换信息（从链接中提取userid）
@@ -553,7 +558,7 @@ class AolastarPlugin(Star):
             logger.error(error_msg)
             yield event.plain_result(error_msg)
 
-    @filter.regex(r'http://www\.100bt\.com/aola/act/zt-friend/\?userid=\d+')
+    @filter.regex(r'https?://www\.100bt\.com/aola/act/zt-friend/\?userid=\d+')
     async def auto_extract_petid(self, event: AstrMessageEvent):
         """自动监听并解析奥拉星好友链接"""
         if not self.api_base_url:
@@ -604,6 +609,149 @@ class AolastarPlugin(Star):
                         logger.error(f"自动解析API请求失败，状态码: {response.status}")
             except Exception as e:
                 logger.error(f"自动解析亚比交换信息时发生错误: {str(e)}")
+
+    @filter.command("ar_pet_search")
+    async def pet_search_command(self, event: AstrMessageEvent):
+        """根据关键词搜索亚比"""
+        if not self.api_base_url:
+            yield event.plain_result("❌ API 基础地址未配置，请在插件设置中配置")
+            return
+        
+        # 解析命令参数
+        args = event.message_str.split()[1:] if len(event.message_str.split()) > 1 else []
+        
+        if not args:
+            yield event.plain_result("❌ 请提供搜索关键词\n用法: /ar_pet_search <关键词>")
+            return
+        
+        keyword = " ".join(args)
+        
+        yield event.plain_result(f"🔄 正在搜索包含 '{keyword}' 的亚比...")
+        
+        # 构建API请求URL
+        api_url = f"{self.api_base_url}/api/pets/search"
+        
+        # 根据OpenAPI规范准备请求数据
+        request_data = {"keyword": keyword}
+        
+        try:
+            # 发送POST请求
+            if not self.session:
+                yield event.plain_result("❌ HTTP会话未初始化")
+                return
+            async with self.session.post(api_url, json=request_data) as response:
+                if response.status == 200:
+                    try:
+                        result = await response.json()
+                        # 格式化搜索结果
+                        formatted_result = self._format_pet_search_result(result, keyword)
+                        yield event.plain_result(formatted_result)
+                    except Exception as e:
+                        logger.error(f"JSON解析错误: {e}")
+                        yield event.plain_result("❌ 响应解析错误")
+                else:
+                    error_msg = f"❌ API请求失败，状态码: {response.status}"
+                    logger.error(error_msg)
+                    yield event.plain_result(error_msg)
+        except Exception as e:
+            error_msg = f"❌ 搜索亚比时发生错误: {str(e)}"
+            logger.error(error_msg)
+            yield event.plain_result(error_msg)
+
+    @filter.command("ar_pet_query")
+    async def pet_query_command(self, event: AstrMessageEvent):
+        """根据ID查询亚比信息，支持单个或多个ID（逗号分隔）"""
+        if not self.api_base_url:
+            yield event.plain_result("❌ API 基础地址未配置，请在插件设置中配置")
+            return
+        
+        # 解析命令参数
+        args = event.message_str.split()[1:] if len(event.message_str.split()) > 1 else []
+        
+        if not args:
+            yield event.plain_result("❌ 请提供亚比ID\n用法: /ar_pet_query <ID> 或 /ar_pet_query <ID1,ID2,ID3>")
+            return
+        
+        # 解析ID列表
+        id_input = " ".join(args)
+        pet_ids = [pet_id.strip() for pet_id in id_input.split(",") if pet_id.strip().isdigit()]
+        
+        if not pet_ids:
+            yield event.plain_result("❌ 请提供有效的亚比ID（纯数字）")
+            return
+        
+        if len(pet_ids) > 20:
+            yield event.plain_result("❌ 一次最多查询20个亚比")
+            return
+        
+        # 查询单个或多个亚比
+        if len(pet_ids) == 1:
+            result = await self._query_single_pet(pet_ids[0])
+            formatted_result = self._format_pet_query_result(result, pet_ids[0])
+            yield event.plain_result(formatted_result)
+        else:
+            results = []
+            for pet_id in pet_ids:
+                result = await self._query_single_pet(pet_id)
+                formatted_result = self._format_pet_query_result(result, pet_id)
+                results.append(formatted_result)
+            
+            # 合并结果
+            combined_result = "\n\n".join(results)
+            yield event.plain_result(combined_result)
+
+    async def _query_single_pet(self, pet_id: str) -> Dict[str, Any]:
+        """查询单个亚比信息"""
+        try:
+            response = await self._make_request(f"/api/pet/{pet_id}")
+            return response if response is not None else {"success": False, "error": "请求失败"}
+        except Exception as e:
+            logger.error(f"查询亚比 {pet_id} 时发生错误: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _format_pet_query_result(self, result: Dict[str, Any], pet_id: str) -> str:
+        """格式化亚比查询结果"""
+        if not result or not result.get("success", False):
+            return f"❌ ID {pet_id}: 未找到相关亚比信息"
+        
+        data = result.get("data", [])
+        logger.info(f"[DEBUG] 亚比 {pet_id} 的原始数据: {data}")
+        
+        if not data or len(data) < 2:
+            return f"❌ ID {pet_id}: 返回数据格式不正确"
+        
+        # 只提取ID和名称
+        pet_name = data[1] if len(data) > 1 else "未知"
+        
+        message_lines = [
+            f"🆔 亚比ID: {pet_id}",
+            f"📛 名称: {pet_name}"
+        ]
+        
+        return "\n".join(message_lines)
+
+    def _format_pet_search_result(self, result: Dict[str, Any], keyword: str) -> str:
+        """格式化亚比搜索结果"""
+        if not result or "data" not in result:
+            return "❌ 未获取到有效的搜索结果"
+        
+        data = result.get("data", [])
+        if not data:
+            return f"❌ 未找到包含 '{keyword}' 的亚比"
+        
+        message_lines = [f"🔍 找到 {len(data)} 个包含 '{keyword}' 的亚比:"]
+        
+        # 限制显示数量，避免信息过长
+        display_count = min(len(data), 20)
+        for i, pet in enumerate(data[:display_count], 1):
+            pet_id = pet.get("id", "未知")
+            pet_name = pet.get("name", "未知亚比")
+            message_lines.append(f"{i}. {pet_name} (ID: {pet_id})")
+        
+        if len(data) > display_count:
+            message_lines.append(f"\n⚠️ 结果过多，仅显示前 {display_count} 个")
+        
+        return "\n".join(message_lines)
 
     def _format_petid_result(self, result: Dict[str, Any]) -> str:
         """格式化亚比交换解析结果"""
