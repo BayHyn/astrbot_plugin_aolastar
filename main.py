@@ -1,6 +1,7 @@
 import aiohttp
 import re
 import time
+import asyncio
 from typing import Optional, Dict, Any, List
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
@@ -680,9 +681,6 @@ class AolastarPlugin(Star):
             yield event.plain_result("❌ 请提供有效的亚比ID（纯数字）")
             return
         
-        if len(pet_ids) > 20:
-            yield event.plain_result("❌ 一次最多查询20个亚比")
-            return
         
         # 查询单个或多个亚比
         if len(pet_ids) == 1:
@@ -690,15 +688,32 @@ class AolastarPlugin(Star):
             formatted_result = self._format_pet_query_result(result, pet_ids[0])
             yield event.plain_result(formatted_result)
         else:
-            results = []
-            for pet_id in pet_ids:
-                result = await self._query_single_pet(pet_id)
-                formatted_result = self._format_pet_query_result(result, pet_id)
-                results.append(formatted_result)
-            
-            # 合并结果
-            combined_result = "\n\n".join(results)
-            yield event.plain_result(combined_result)
+            CHUNK_SIZE = 20
+            total_ids = len(pet_ids)
+            yield event.plain_result(f"🔍 收到 {total_ids} 个亚比ID查询请求，将分批处理...")
+
+            num_chunks = (total_ids + CHUNK_SIZE - 1) // CHUNK_SIZE
+            for i in range(0, total_ids, CHUNK_SIZE):
+                chunk_ids = pet_ids[i:i + CHUNK_SIZE]
+                
+                # 并发查询当前批次的亚比
+                tasks = [self._query_single_pet(pet_id) for pet_id in chunk_ids]
+                results_data = await asyncio.gather(*tasks)
+                
+                # 格式化结果
+                results = []
+                for pet_id, result in zip(chunk_ids, results_data):
+                    formatted_result = self._format_pet_query_result(result, pet_id)
+                    results.append(formatted_result)
+                
+                # 合并结果并发送
+                combined_result = "\n\n".join(results)
+                chunk_num = i // CHUNK_SIZE + 1
+                yield event.plain_result(f"--- 批次 {chunk_num}/{num_chunks} ---\n{combined_result}")
+                
+                # 在批次之间添加延迟以避免速率限制
+                if chunk_num < num_chunks:
+                    await asyncio.sleep(1)
 
     async def _query_single_pet(self, pet_id: str) -> Dict[str, Any]:
         """查询单个亚比信息"""
